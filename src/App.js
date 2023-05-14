@@ -1,14 +1,5 @@
 import React, { Component } from 'react';
 
-window.DeviceMotionEvent.requestPermission()
-.then(permissionState => {
-  if (permissionState === 'granted') {
-    window.addEventListener('devicemotion', this.handleOrientation);
-    this.setState({noaccess:false})
-  }
-})
-.catch(console.error);
-
 class App extends Component {
   constructor(props) {
     super(props);
@@ -16,12 +7,13 @@ class App extends Component {
       alpha: 0,
       beta: 0,
       gamma: 0,
+      noaccess: true,
     };
   }
 
   componentDidMount() {
     if (window.DeviceOrientationEvent) {
-      window.addEventListener('deviceorientation', this.handleOrientation);
+      this.handlePermission();
     } else {
       console.log("Sorry, your browser doesn't support Device Orientation");
     }
@@ -30,6 +22,21 @@ class App extends Component {
   componentWillUnmount() {
     window.removeEventListener('deviceorientation', this.handleOrientation);
   }
+
+  handlePermission = async () => {
+    if (typeof DeviceMotionEvent.requestPermission === 'function') {
+      const permissionState = await DeviceMotionEvent.requestPermission();
+
+      if (permissionState === 'granted') {
+        window.addEventListener('deviceorientation', this.handleOrientation);
+        this.setState({ noaccess: false });
+      }
+    } else {
+      // for browsers that don't need permission
+      window.addEventListener('deviceorientation', this.handleOrientation);
+      this.setState({ noaccess: false });
+    }
+  };
 
   handleOrientation = (event) => {
     this.setState({
@@ -40,7 +47,7 @@ class App extends Component {
   };
 
   render() {
-    const { alpha, beta, gamma } = this.state;
+    const { alpha, beta, gamma, noaccess } = this.state;
   
     const dotStyle = {
       position: 'relative',
@@ -52,17 +59,25 @@ class App extends Component {
       borderRadius: '50%',
     };
   
-    return (
-      <div>
-        <h1>Gyroscope Data:</h1>
-        <p>Alpha: {alpha}</p>
-        <p>Beta: {beta}</p>
-        <p>Gamma: {gamma}</p>
-        <div style={{position: 'relative', width: '100%', height: '400px', border: '1px solid black'}}>
-          <div style={dotStyle}></div>
+    if (noaccess) {
+      return (
+        <button onClick={this.handlePermission}>
+          Grant permission to access motion and orientation
+        </button>
+      );
+    } else {
+      return (
+        <div>
+          <h1>Gyroscope Data:</h1>
+          <p>Alpha: {alpha}</p>
+          <p>Beta: {beta}</p>
+          <p>Gamma: {gamma}</p>
+          <div style={{position: 'relative', width: '100%', height: '400px', border: '1px solid black'}}>
+            <div style={dotStyle}></div>
+          </div>
         </div>
-      </div>
-    );
+      );
+    }
   }
   
 }
