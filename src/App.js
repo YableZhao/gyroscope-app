@@ -1,5 +1,14 @@
 import React, { Component } from 'react';
 
+window.DeviceMotionEvent.requestPermission()
+.then(permissionState => {
+  if (permissionState === 'granted') {
+    window.addEventListener('devicemotion', this.handleOrientation);
+    this.setState({noaccess:false})
+  }
+})
+.catch(console.error);
+
 class App extends Component {
   constructor(props) {
     super(props);
