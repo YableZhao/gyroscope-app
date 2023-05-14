@@ -47,8 +47,10 @@ class App extends Component {
   };
 
   render() {
-    const { alpha, beta, gamma, noaccess } = this.state;
+    const { alpha, beta: betaState, gamma: gammaState, noaccess } = this.state;
 
+    let beta = betaState
+    let gamma = gammaState
       // Adjust for device orientation
     switch (window.orientation) {
       case 0:
