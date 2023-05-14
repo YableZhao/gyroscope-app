@@ -73,8 +73,8 @@ class App extends Component {
   
     const dotStyle = {
       position: 'relative',
-      top: `${50 + gamma}%`,
-      left: `${50 + beta}%`,
+      top: `${50 + beta}%`,
+      left: `${50 + gamma}%`,
       width: '10px',
       height: '10px',
       backgroundColor: 'red',
