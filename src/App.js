@@ -48,6 +48,28 @@ class App extends Component {
 
   render() {
     const { alpha, beta, gamma, noaccess } = this.state;
+
+      // Adjust for device orientation
+  switch (window.orientation) {
+    case 0:
+      // Portrait orientation. This is the default. No need to adjust anything.
+      break;
+    case 90:
+      // Landscape orientation, rotated clockwise
+      [beta, gamma] = [gamma, -beta];
+      break;
+    case -90:
+      // Landscape orientation, rotated counterclockwise
+      [beta, gamma] = [-gamma, beta];
+      break;
+    case 180:
+      // Upside-down portrait orientation
+      [beta, gamma] = [-beta, -gamma];
+      break;
+    default:
+      // Unknown orientation. Don't adjust anything.
+      break;
+  }
   
     const dotStyle = {
       position: 'relative',
