@@ -58,11 +58,11 @@ class App extends Component {
         break;
       case 90:
         // Landscape orientation, rotated clockwise
-        [beta, gamma] = [gamma, -beta];
+        [beta, gamma] = [-gamma, beta];
         break;
       case -90:
         // Landscape orientation, rotated counterclockwise
-        [beta, gamma] = [-gamma, beta];
+        [beta, gamma] = [gamma, -beta];
         break;
       case 180:
         // Upside-down portrait orientation
