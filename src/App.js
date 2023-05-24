@@ -1,109 +1,95 @@
-import React, { Component } from 'react';
+import React, { useEffect, useState } from 'react';
+import useOrientationPermission from './useOrientationPermission';
 
-class App extends Component {
-  constructor(props) {
-    super(props);
-    this.state = {
-      alpha: 0,
-      beta: 0,
-      gamma: 0,
-      noaccess: true,
+function App() {
+  const { permission, requestPermission } = useOrientationPermission();
+
+  const [alpha, setAlpha] = useState(0);
+  const [beta, setBeta] = useState(0);
+  const [gamma, setGamma] = useState(0);
+
+  useEffect(() => {
+    const handleOrientation = (event) => {
+      if (permission === 'granted') {
+        setAlpha(event.alpha);
+        setBeta(event.beta);
+        setGamma(event.gamma);
+      }
     };
-  }
 
-  componentDidMount() {
     if (window.DeviceOrientationEvent) {
-      this.handlePermission();
+      window.addEventListener('deviceorientation', handleOrientation);
     } else {
       console.log("Sorry, your browser doesn't support Device Orientation");
     }
-  }
 
-  componentWillUnmount() {
-    window.removeEventListener('deviceorientation', this.handleOrientation);
-  }
-
-  handlePermission = async () => {
-    if (typeof DeviceMotionEvent.requestPermission === 'function') {
-      const permissionState = await DeviceMotionEvent.requestPermission();
-
-      if (permissionState === 'granted') {
-        window.addEventListener('deviceorientation', this.handleOrientation);
-        this.setState({ noaccess: false });
-      }
-    } else {
-      // for browsers that don't need permission
-      window.addEventListener('deviceorientation', this.handleOrientation);
-      this.setState({ noaccess: false });
-    }
-  };
-
-  handleOrientation = (event) => {
-    this.setState({
-      alpha: event.alpha,
-      beta: event.beta,
-      gamma: event.gamma,
-    });
-  };
-
-  render() {
-    const { alpha, beta: betaState, gamma: gammaState, noaccess } = this.state;
-
-    let beta = betaState
-    let gamma = gammaState
-      // Adjust for device orientation
-    switch (window.orientation) {
-      case 0:
-        // Portrait orientation. This is the default. No need to adjust anything.
-        break;
-      case 90:
-        // Landscape orientation, rotated clockwise
-        [beta, gamma] = [-gamma, beta];
-        break;
-      case -90:
-        // Landscape orientation, rotated counterclockwise
-        [beta, gamma] = [gamma, -beta];
-        break;
-      case 180:
-        // Upside-down portrait orientation
-        [beta, gamma] = [-beta, -gamma];
-        break;
-      default:
-        // Unknown orientation. Don't adjust anything.
-        break;
-    }
-  
-    const dotStyle = {
-      position: 'relative',
-      top: `${50 + beta}%`,
-      left: `${50 + gamma}%`,
-      width: '10px',
-      height: '10px',
-      backgroundColor: 'red',
-      borderRadius: '50%',
+    return () => {
+      window.removeEventListener('deviceorientation', handleOrientation);
     };
-  
-    if (noaccess) {
-      return (
-        <button onClick={this.handlePermission}>
-          Grant permission to access motion and orientation
-        </button>
-      );
-    } else {
-      return (
-        <div>
-          <h1>Gyroscope Data:</h1>
-          <p>Alpha: {alpha}</p>
-          <p>Beta: {beta}</p>
-          <p>Gamma: {gamma}</p>
-          <div style={{position: 'relative', width: '100%', height: '400px', border: '1px solid black'}}>
-            <div style={dotStyle}></div>
-          </div>
-        </div>
-      );
-    }
+  }, [permission]);
+
+  let betaAdjusted = beta;
+  let gammaAdjusted = gamma;
+
+  switch (window.orientation) {
+    case 90:
+      [betaAdjusted, gammaAdjusted] = [-gammaAdjusted, betaAdjusted];
+      break;
+    case -90:
+      [betaAdjusted, gammaAdjusted] = [gammaAdjusted, -betaAdjusted];
+      break;
+    case 180:
+      [betaAdjusted, gammaAdjusted] = [-betaAdjusted, -gammaAdjusted];
+      break;
+    default:
+      break;
   }
+
+  const dotStyle = {
+    position: 'relative',
+    top: `${50 + betaAdjusted}%`,
+    left: `${50 + gammaAdjusted}%`,
+    width: '10px',
+    height: '10px',
+    backgroundColor: "#ffcb05",
+    borderRadius: '50%',
+  };
+
+  return (
+    <div style={{display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', height: '100vh', gap: '20px'}}>
+      <h1 style={{margin: '0'}}>Status</h1>
+      <button 
+        onClick={requestPermission} 
+        style={{backgroundColor: permission === 'granted' ? '#668fac' : '#ffd24d', borderRadius: '12px', padding: '10px', border: 'none', cursor: 'pointer'}}
+      >
+        {permission === 'granted' ? 'Revoke' : 'Grant'} permission to access motion and orientation
+      </button>
+      <div style={{position: 'relative', width: '90vw', height: '50vh', border: '1px solid black', backgroundColor: '#00274c'}}>
+        {/* One vertical line and one horizontal line */}
+        <div style={{position: 'absolute', top: '50%', left: '0', width: '100%', height: '1px', backgroundColor: 'black'}}></div>
+        <div style={{position: 'absolute', top: '0', left: '50%', width: '1px', height: '100%', backgroundColor: 'black'}}></div>
+        <div style={dotStyle}></div>
+      </div>
+      <div style={{display: 'flex', gap: '5px'}}>
+        <div>
+          <p>Beta: </p>
+          <input type="range" min="-90" max="90" value={beta} onChange={(e) => setBeta(parseFloat(e.target.value))} style={{background: '#668fac'}} />
+        </div>
+        <input type="number" min="-90" max="90" value={beta} onChange={(e) => setBeta(parseFloat(e.target.value))} style={{width: '10vw', height: '4vh'}} />
+      </div>
+      <div style={{display: 'flex', gap: '5px'}}>
+        <div>
+          <p>Gamma: </p>
+          <input type="range" min="-90" max="90" value={gamma} onChange={(e) => setGamma(parseFloat(e.target.value))} style={{background: '#668fac'}} />
+        </div>
+        <input type="number" min="-90" max="90" value={gamma} onChange={(e) => setGamma(parseFloat(e.target.value))} style={{width: '10vw',height: '4vh'}} />
+      </div>
+    </div>
+  );
   
-}
+
+
+  
+  }
 
 export default App;
