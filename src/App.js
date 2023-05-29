@@ -8,6 +8,11 @@ function App() {
   const [beta, setBeta] = useState(0);
   const [gamma, setGamma] = useState(0);
 
+  const handleReset = () => {
+    setAlpha(0);
+    setBeta(0);
+    setGamma(0);
+  };
   useEffect(() => {
     const handleOrientation = (event) => {
       if (permission === 'granted') {
@@ -45,10 +50,16 @@ function App() {
       break;
   }
 
+  let smoothedBeta = 0;
+  let smoothedGamma = 0;
+  const smoothingFactor = 0.8;  // closer to 1 = more smoothing, closer to 0 = less smoothing
+  
+  smoothedBeta = smoothingFactor * smoothedBeta + (1 - smoothingFactor) * betaAdjusted;
+  smoothedGamma = smoothingFactor * smoothedGamma + (1 - smoothingFactor) * gammaAdjusted;
   const dotStyle = {
     position: 'relative',
-    top: `${50 + betaAdjusted}%`,
-    left: `${50 + gammaAdjusted}%`,
+    top: `${50 + smoothedBeta}%`,
+    left: `${50 + smoothedGamma}%`,
     width: '10px',
     height: '10px',
     backgroundColor: "#ffcb05",
@@ -84,6 +95,7 @@ function App() {
         </div>
         <input type="number" min="-90" max="90" value={gamma} onChange={(e) => setGamma(parseFloat(e.target.value))} style={{width: '10vw',height: '4vh'}} />
       </div>
+      <button onClick={handleReset} style={{marginTop: '20px'}}>Reset</button>
     </div>
   );
   
