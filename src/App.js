@@ -52,7 +52,7 @@ function App() {
 
   let smoothedBeta = 0;
   let smoothedGamma = 0;
-  const smoothingFactor = 0.8;  // closer to 1 = more smoothing, closer to 0 = less smoothing
+  const smoothingFactor = 0.5;  // closer to 1 = more smoothing, closer to 0 = less smoothing
   
   smoothedBeta = smoothingFactor * smoothedBeta + (1 - smoothingFactor) * betaAdjusted;
   smoothedGamma = smoothingFactor * smoothedGamma + (1 - smoothingFactor) * gammaAdjusted;
