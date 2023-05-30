@@ -7,11 +7,13 @@ function App() {
   const [alpha, setAlpha] = useState(0);
   const [beta, setBeta] = useState(0);
   const [gamma, setGamma] = useState(0);
+  const [smoothingFactor, setSmoothingFactor] = useState(0); // Add a state for smoothingFactor
 
   const handleReset = () => {
     setAlpha(0);
     setBeta(0);
     setGamma(0);
+    setSmoothingFactor(0); // Reset smoothingFactor to default value
   };
   useEffect(() => {
     const handleOrientation = (event) => {
@@ -51,8 +53,7 @@ function App() {
   }
 
   let smoothedBeta = 0;
-  let smoothedGamma = 0;
-  const smoothingFactor = 0.5;  // closer to 1 = more smoothing, closer to 0 = less smoothing
+  let smoothedGamma = 0;  // closer to 1 = more smoothing, closer to 0 = less smoothing
   
   smoothedBeta = smoothingFactor * smoothedBeta + (1 - smoothingFactor) * betaAdjusted;
   smoothedGamma = smoothingFactor * smoothedGamma + (1 - smoothingFactor) * gammaAdjusted;
@@ -94,6 +95,13 @@ function App() {
           <input type="range" min="-90" max="90" value={gamma} onChange={(e) => setGamma(parseFloat(e.target.value))} style={{background: '#668fac'}} />
         </div>
         <input type="number" min="-90" max="90" value={gamma} onChange={(e) => setGamma(parseFloat(e.target.value))} style={{width: '10vw',height: '4vh'}} />
+      </div>
+      <div style={{display: 'flex', gap: '5px'}}>
+        <div>
+          <p>Smoothing Factor: </p>
+          <input type="range" min="0" max="1" step="0.01" value={smoothingFactor} onChange={(e) => setSmoothingFactor(parseFloat(e.target.value))} style={{background: '#668fac'}} />
+        </div>
+        <input type="number" min="0" max="1" step="0.01" value={smoothingFactor} onChange={(e) => setSmoothingFactor(parseFloat(e.target.value))} style={{width: '10vw',height: '4vh'}} />
       </div>
       <button onClick={handleReset} style={{marginTop: '20px'}}>Reset</button>
     </div>
