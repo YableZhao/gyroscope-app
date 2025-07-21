@@ -1,0 +1,27 @@
+# Resource quotas for production namespace
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: production-resource-quota
+  namespace: multimodal-platform-prod
+spec:
+  hard:
+    # Compute resources
+    requests.cpu: "4"
+    requests.memory: 8Gi
+    limits.cpu: "8"
+    limits.memory: 16Gi
+    
+    # Storage resources
+    requests.storage: 50Gi
+    persistentvolumeclaims: "10"
+    
+    # Object counts
+    pods: "50"
+    replicationcontrollers: "20"
+    resourcequotas: "1"
+    secrets: "20"
+    configmaps: "20"
+    services: "20"
+    services.loadbalancers: "3"
+    services.nodeports: "0"

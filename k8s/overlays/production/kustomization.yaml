@@ -1,0 +1,129 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+metadata:
+  name: multimodal-platform-production
+
+# Base configuration
+resources:
+  - ../../base
+  - production-secrets.yaml
+  - network-policies.yaml
+  - pod-disruption-budgets.yaml
+
+# Production-specific labels
+commonLabels:
+  environment: production
+
+# Namespace override for production
+namespace: multimodal-platform-prod
+
+# Image tags for production (use specific versions)
+images:
+  - name: multimodal-frontend
+    newTag: "1.0.0"
+  - name: multimodal-api-gateway
+    newTag: "1.0.0"
+  - name: multimodal-websocket-service
+    newTag: "1.0.0"
+  - name: multimodal-auth-service
+    newTag: "1.0.0"
+  - name: multimodal-user-service
+    newTag: "1.0.0"
+  - name: multimodal-game-service
+    newTag: "1.0.0"
+
+# Patches for production environment
+patches:
+  # Increase replica counts for production
+  - target:
+      kind: Deployment
+      name: frontend
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 3
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: NODE_ENV
+          value: "production"
+
+  - target:
+      kind: Deployment
+      name: api-gateway
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 3
+
+  - target:
+      kind: Deployment
+      name: websocket-service
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 3
+
+  - target:
+      kind: Deployment
+      name: auth-service
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 2
+
+  - target:
+      kind: Deployment
+      name: user-service
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 2
+
+  - target:
+      kind: Deployment
+      name: game-service
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 3
+
+  # Update ingress for production domain
+  - target:
+      kind: Ingress
+      name: multimodal-ingress
+    patch: |-
+      - op: replace
+        path: /spec/rules/0/host
+        value: api.multimodal-platform.com
+      - op: replace
+        path: /spec/tls/0/hosts/0
+        value: api.multimodal-platform.com
+
+  # Increase resource limits for production
+  - target:
+      kind: Deployment
+      labelSelector: "app.kubernetes.io/component!=database,app.kubernetes.io/component!=cache"
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/memory
+        value: "1Gi"
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/cpu
+        value: "500m"
+
+# Production-specific ConfigMap
+configMapGenerator:
+  - name: app-config
+    behavior: merge
+    literals:
+      - NODE_ENV=production
+      - GIN_MODE=release
+      - NEXT_PUBLIC_API_URL=https://api.multimodal-platform.com
+      - NEXT_PUBLIC_WS_URL=wss://api.multimodal-platform.com/ws
+
+# Resource quotas and limits
+resources:
+  - resource-quota.yaml
+  - limit-range.yaml

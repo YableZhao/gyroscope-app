@@ -1,0 +1,55 @@
+# Development overrides - automatically loaded by docker-compose
+version: '3.8'
+
+services:
+  # Frontend development overrides
+  frontend:
+    build:
+      dockerfile: Dockerfile.dev
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.next
+    environment:
+      - NODE_ENV=development
+      - CHOKIDAR_USEPOLLING=true
+    ports:
+      - "3000:3000"
+      - "9229:9229" # Node.js debugging
+
+  # Backend services in debug mode
+  api-gateway:
+    environment:
+      - GIN_MODE=debug
+    
+  websocket-service:
+    environment:
+      - GIN_MODE=debug
+    
+  auth-service:
+    environment:
+      - GIN_MODE=debug
+      
+  user-service:
+    environment:
+      - GIN_MODE=debug
+      
+  game-service:
+    environment:
+      - GIN_MODE=debug
+
+  # Database with additional development settings
+  postgres:
+    environment:
+      - POSTGRES_DB=multimodal_platform_dev
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_dev_data:/var/lib/postgresql/data
+
+  # Redis with persistence disabled for faster development
+  redis:
+    command: redis-server --save ""
+
+volumes:
+  postgres_dev_data:

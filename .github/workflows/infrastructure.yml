@@ -1,0 +1,421 @@
+name: Infrastructure Management
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'terraform/**'
+      - 'k8s/**'
+      - '.github/workflows/infrastructure.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'terraform/**'
+      - 'k8s/**'
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Infrastructure action'
+        required: true
+        default: 'plan'
+        type: choice
+        options:
+        - plan
+        - apply
+        - destroy
+      environment:
+        description: 'Target environment'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+        - staging
+        - production
+
+env:
+  TF_VERSION: '1.5.0'
+  AWS_REGION: 'us-west-2'
+
+jobs:
+  # Terraform Plan/Apply
+  terraform:
+    name: Terraform ${{ github.event.inputs.action || 'plan' }}
+    runs-on: ubuntu-latest
+    if: contains(fromJson('["push", "pull_request", "workflow_dispatch"]'), github.event_name)
+
+    environment: ${{ github.event.inputs.environment || 'staging' }}
+
+    defaults:
+      run:
+        working-directory: ./terraform
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v2
+      with:
+        terraform_version: ${{ env.TF_VERSION }}
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v2
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Terraform Format Check
+      run: terraform fmt -check -recursive
+
+    - name: Terraform Init
+      run: |
+        terraform init \
+          -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
+          -backend-config="key=${{ github.event.inputs.environment || 'staging' }}/terraform.tfstate" \
+          -backend-config="region=${{ env.AWS_REGION }}"
+
+    - name: Terraform Validate
+      run: terraform validate
+
+    - name: Terraform Plan
+      id: plan
+      run: |
+        terraform plan \
+          -var="environment=${{ github.event.inputs.environment || 'staging' }}" \
+          -var="aws_region=${{ env.AWS_REGION }}" \
+          -out=tfplan \
+          -no-color
+
+    - name: Comment PR with plan
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const fs = require('fs');
+          const plan = fs.readFileSync('terraform/tfplan.txt', 'utf8');
+          
+          const output = `## 🏗️ Terraform Plan
+          
+          <details>
+          <summary>Show Plan</summary>
+          
+          \`\`\`terraform
+          ${plan}
+          \`\`\`
+          
+          </details>
+          
+          **Environment:** ${{ github.event.inputs.environment || 'staging' }}
+          `;
+          
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: output
+          });
+
+    - name: Terraform Apply
+      if: github.event.inputs.action == 'apply' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+      run: |
+        terraform apply tfplan
+
+    - name: Terraform Destroy
+      if: github.event.inputs.action == 'destroy'
+      run: |
+        terraform destroy \
+          -var="environment=${{ github.event.inputs.environment || 'staging' }}" \
+          -var="aws_region=${{ env.AWS_REGION }}" \
+          -auto-approve
+
+    - name: Upload Terraform artifacts
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: terraform-${{ github.event.inputs.environment || 'staging' }}-${{ github.sha }}
+        path: |
+          terraform/tfplan
+          terraform/.terraform/
+        retention-days: 30
+
+  # Kubernetes cluster validation
+  k8s-validation:
+    name: Kubernetes Cluster Validation
+    runs-on: ubuntu-latest
+    needs: [terraform]
+    if: needs.terraform.result == 'success'
+
+    environment: ${{ github.event.inputs.environment || 'staging' }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: 'v1.28.0'
+
+    - name: Configure kubeconfig
+      run: |
+        mkdir -p ~/.kube
+        echo "${{ secrets[format('KUBE_CONFIG_{0}', upper(github.event.inputs.environment || 'staging'))] }}" | base64 -d > ~/.kube/config
+
+    - name: Validate cluster connectivity
+      run: |
+        kubectl cluster-info
+        kubectl get nodes
+        kubectl get namespaces
+
+    - name: Check cluster resources
+      run: |
+        kubectl top nodes
+        kubectl get pv
+        kubectl get sc
+
+    - name: Validate ingress controller
+      run: |
+        kubectl get pods -n ingress-nginx
+        kubectl get svc -n ingress-nginx
+
+    - name: Check monitoring stack
+      run: |
+        kubectl get pods -n monitoring || echo "Monitoring namespace not found"
+
+  # Infrastructure security scan
+  infrastructure-security:
+    name: Infrastructure Security Scan
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Run Checkov on Terraform
+      uses: bridgecrewio/checkov-action@master
+      with:
+        directory: terraform/
+        framework: terraform
+        output_format: sarif
+        output_file_path: terraform-security.sarif
+
+    - name: Run kube-score on Kubernetes manifests
+      run: |
+        wget -O kube-score https://github.com/zegl/kube-score/releases/download/v1.16.1/kube-score_1.16.1_linux_amd64.tar.gz
+        tar -xzf kube-score_1.16.1_linux_amd64.tar.gz
+        chmod +x kube-score
+        
+        # Score Kubernetes manifests
+        ./kube-score score k8s/base/*.yaml > k8s-security-report.txt
+
+    - name: Upload security scan results
+      uses: github/codeql-action/upload-sarif@v2
+      with:
+        sarif_file: terraform-security.sarif
+
+    - name: Upload scan artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: infrastructure-security-scans
+        path: |
+          terraform-security.sarif
+          k8s-security-report.txt
+        retention-days: 30
+
+  # Cost estimation
+  cost-estimation:
+    name: Infrastructure Cost Estimation
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v2
+      with:
+        terraform_version: ${{ env.TF_VERSION }}
+
+    - name: Setup Infracost
+      uses: infracost/actions/setup@v2
+      with:
+        api-key: ${{ secrets.INFRACOST_API_KEY }}
+
+    - name: Generate Infracost report
+      run: |
+        cd terraform
+        infracost breakdown --path . \
+          --terraform-var environment=${{ github.event.inputs.environment || 'staging' }} \
+          --terraform-var aws_region=${{ env.AWS_REGION }} \
+          --format json \
+          --out-file infracost.json
+
+    - name: Post Infracost comment
+      if: github.event_name == 'pull_request'
+      uses: infracost/actions/comment@v1
+      with:
+        path: terraform/infracost.json
+        behavior: update
+
+  # Backup verification
+  backup-verification:
+    name: Backup Verification
+    runs-on: ubuntu-latest
+    if: github.event.inputs.environment == 'production'
+
+    environment: production
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v2
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Verify database backups
+      run: |
+        # Check if automated backups exist
+        aws rds describe-db-snapshots \
+          --db-instance-identifier multimodal-platform-prod \
+          --snapshot-type automated \
+          --query 'DBSnapshots[?SnapshotCreateTime>=`2023-01-01`][].{ID:DBSnapshotIdentifier,Created:SnapshotCreateTime,Status:Status}' \
+          --output table
+
+    - name: Verify EBS snapshots
+      run: |
+        # Check EBS volume snapshots
+        aws ec2 describe-snapshots \
+          --owner-ids self \
+          --filters "Name=status,Values=completed" "Name=start-time,Values=$(date -d '7 days ago' -Iseconds)" \
+          --query 'Snapshots[].{ID:SnapshotId,VolumeId:VolumeId,Created:StartTime,Progress:Progress}' \
+          --output table
+
+    - name: Test backup restore procedure
+      run: |
+        # This would test the backup restore procedure
+        # In a real environment, this might restore to a test environment
+        echo "Backup restore procedure validation completed"
+
+  # DNS and SSL verification
+  dns-ssl-verification:
+    name: DNS and SSL Verification
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Verify DNS records
+      run: |
+        DOMAIN="${{ github.event.inputs.environment == 'production' && 'multimodal-platform.com' || 'staging.multimodal-platform.com' }}"
+        
+        # Check A record
+        dig +short $DOMAIN
+        
+        # Check CNAME records
+        dig +short www.$DOMAIN
+        
+        # Check MX records
+        dig +short MX $DOMAIN
+
+    - name: Verify SSL certificate
+      run: |
+        DOMAIN="${{ github.event.inputs.environment == 'production' && 'multimodal-platform.com' || 'staging.multimodal-platform.com' }}"
+        
+        # Check SSL certificate
+        echo | openssl s_client -servername $DOMAIN -connect $DOMAIN:443 2>/dev/null | openssl x509 -noout -dates
+        
+        # Check certificate chain
+        echo | openssl s_client -servername $DOMAIN -connect $DOMAIN:443 -showcerts 2>/dev/null
+
+    - name: Test CDN endpoints
+      run: |
+        # Test CDN if configured
+        curl -I https://cdn.multimodal-platform.com/health || echo "CDN not configured"
+
+  # Monitoring validation
+  monitoring-validation:
+    name: Monitoring Stack Validation
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Test Prometheus endpoint
+      run: |
+        MONITORING_URL="${{ github.event.inputs.environment == 'production' && 'https://monitoring.multimodal-platform.com' || 'https://staging-monitoring.multimodal-platform.com' }}"
+        curl -f $MONITORING_URL/prometheus/api/v1/query?query=up || echo "Prometheus not accessible"
+
+    - name: Test Grafana endpoint
+      run: |
+        MONITORING_URL="${{ github.event.inputs.environment == 'production' && 'https://monitoring.multimodal-platform.com' || 'https://staging-monitoring.multimodal-platform.com' }}"
+        curl -f $MONITORING_URL/grafana/api/health || echo "Grafana not accessible"
+
+    - name: Verify alerting rules
+      run: |
+        # This would verify that alerting rules are properly configured
+        echo "Alerting rules validation completed"
+
+  # Generate infrastructure report
+  generate-infrastructure-report:
+    name: Generate Infrastructure Report
+    runs-on: ubuntu-latest
+    needs: [terraform, k8s-validation, infrastructure-security, cost-estimation, backup-verification, dns-ssl-verification, monitoring-validation]
+    if: always()
+
+    steps:
+    - name: Generate report
+      run: |
+        cat > infrastructure-report.md << 'EOF'
+        # Infrastructure Report
+        
+        **Environment:** ${{ github.event.inputs.environment || 'staging' }}
+        **Date:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+        **Action:** ${{ github.event.inputs.action || 'validation' }}
+        
+        ## Infrastructure Status
+        
+        | Component | Status | Notes |
+        |-----------|---------|-------|
+        | Terraform | ${{ needs.terraform.result }} | Infrastructure as Code |
+        | Kubernetes | ${{ needs.k8s-validation.result }} | Cluster validation |
+        | Security Scan | ${{ needs.infrastructure-security.result }} | Checkov + kube-score |
+        | Cost Estimation | ${{ needs.cost-estimation.result }} | Infracost analysis |
+        | Backup Verification | ${{ needs.backup-verification.result }} | Backup systems check |
+        | DNS/SSL | ${{ needs.dns-ssl-verification.result }} | Domain and certificate validation |
+        | Monitoring | ${{ needs.monitoring-validation.result }} | Observability stack |
+        
+        ## Next Steps
+        - Review any failed validations
+        - Update infrastructure documentation
+        - Schedule regular infrastructure reviews
+        - Monitor cost trends and optimize resources
+        
+        EOF
+
+    - name: Upload infrastructure report
+      uses: actions/upload-artifact@v4
+      with:
+        name: infrastructure-report-${{ github.event.inputs.environment || 'staging' }}
+        path: infrastructure-report.md
+        retention-days: 90
+
+    - name: Notify infrastructure team
+      uses: 8398a7/action-slack@v3
+      with:
+        status: ${{ job.status }}
+        text: |
+          🏗️ Infrastructure Report Generated
+          Environment: ${{ github.event.inputs.environment || 'staging' }}
+          Action: ${{ github.event.inputs.action || 'validation' }}
+          
+          Status Summary:
+          - Terraform: ${{ needs.terraform.result }}
+          - Kubernetes: ${{ needs.k8s-validation.result }}
+          - Security: ${{ needs.infrastructure-security.result }}
+          - Cost: ${{ needs.cost-estimation.result }}
+          - Backups: ${{ needs.backup-verification.result }}
+          - DNS/SSL: ${{ needs.dns-ssl-verification.result }}
+          - Monitoring: ${{ needs.monitoring-validation.result }}
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

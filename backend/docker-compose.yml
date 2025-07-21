@@ -1,0 +1,196 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: multimodal-postgres
+    environment:
+      POSTGRES_DB: multimodal_platform
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Redis Cache and Message Broker
+  redis:
+    image: redis:7-alpine
+    container_name: multimodal-redis
+    command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # API Gateway
+  api-gateway:
+    build:
+      context: .
+      dockerfile: api-gateway/Dockerfile
+    container_name: multimodal-api-gateway
+    ports:
+      - "8080:8080"
+    environment:
+      - GIN_MODE=debug
+      - PORT=8080
+      - REDIS_ADDR=redis:6379
+      - AUTH_SERVICE_URL=http://auth-service:8082
+      - USER_SERVICE_URL=http://user-service:8083
+      - GAME_SERVICE_URL=http://game-service:8084
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # WebSocket Service
+  websocket-service:
+    build:
+      context: .
+      dockerfile: websocket-service/Dockerfile
+    container_name: multimodal-websocket
+    ports:
+      - "8081:8081"
+    environment:
+      - GIN_MODE=debug
+      - WS_PORT=8081
+      - REDIS_ADDR=redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Auth Service
+  auth-service:
+    build:
+      context: .
+      dockerfile: auth-service/Dockerfile
+    container_name: multimodal-auth
+    ports:
+      - "8082:8082"
+    environment:
+      - GIN_MODE=debug
+      - PORT=8082
+      - DATABASE_URL=postgres://postgres:postgres@postgres:5432/multimodal_platform?sslmode=disable
+      - REDIS_ADDR=redis:6379
+      - JWT_SECRET=your-super-secret-jwt-key
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # User Service
+  user-service:
+    build:
+      context: .
+      dockerfile: user-service/Dockerfile
+    container_name: multimodal-user
+    ports:
+      - "8083:8083"
+    environment:
+      - GIN_MODE=debug
+      - PORT=8083
+      - DATABASE_URL=postgres://postgres:postgres@postgres:5432/multimodal_platform?sslmode=disable
+      - REDIS_ADDR=redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Game Service
+  game-service:
+    build:
+      context: .
+      dockerfile: game-service/Dockerfile
+    container_name: multimodal-game
+    ports:
+      - "8084:8084"
+    environment:
+      - GIN_MODE=debug
+      - PORT=8084
+      - DATABASE_URL=postgres://postgres:postgres@postgres:5432/multimodal_platform?sslmode=disable
+      - REDIS_ADDR=redis:6379
+      - WEBSOCKET_SERVICE_URL=http://websocket-service:8081
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Nginx Load Balancer (Production)
+  nginx:
+    image: nginx:alpine
+    container_name: multimodal-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf
+      - ./ssl:/etc/nginx/ssl
+    depends_on:
+      - api-gateway
+      - websocket-service
+    restart: unless-stopped
+    profiles:
+      - production
+
+  # Prometheus Monitoring
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: multimodal-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+    profiles:
+      - monitoring
+
+  # Grafana Dashboard
+  grafana:
+    image: grafana/grafana:latest
+    container_name: multimodal-grafana
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./grafana/datasources:/etc/grafana/provisioning/datasources
+    depends_on:
+      - prometheus
+    profiles:
+      - monitoring
+
+volumes:
+  postgres_data:
+  redis_data:
+  prometheus_data:
+  grafana_data:
+
+networks:
+  default:
+    name: multimodal-network

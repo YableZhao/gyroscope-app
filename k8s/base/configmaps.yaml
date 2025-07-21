@@ -1,0 +1,141 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: multimodal-platform
+  labels:
+    app.kubernetes.io/name: multimodal-platform
+    app.kubernetes.io/component: config
+data:
+  # Frontend configuration
+  NEXT_PUBLIC_API_URL: "http://api-gateway-service:8080"
+  NEXT_PUBLIC_WS_URL: "ws://websocket-service:8081"
+  NODE_ENV: "production"
+  
+  # Backend configuration
+  GIN_MODE: "release"
+  
+  # Database configuration
+  POSTGRES_DB: "multimodal_platform"
+  POSTGRES_USER: "postgres"
+  
+  # Redis configuration
+  REDIS_ADDR: "redis-service:6379"
+  
+  # Service URLs
+  AUTH_SERVICE_URL: "http://auth-service:8082"
+  USER_SERVICE_URL: "http://user-service:8083"
+  GAME_SERVICE_URL: "http://game-service:8084"
+  WEBSOCKET_SERVICE_URL: "http://websocket-service:8081"
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-config
+  namespace: multimodal-platform
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/component: config
+data:
+  POSTGRES_DB: "multimodal_platform"
+  POSTGRES_USER: "postgres"
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-config
+  namespace: multimodal-platform
+  labels:
+    app.kubernetes.io/name: nginx
+    app.kubernetes.io/component: config
+data:
+  nginx.conf: |
+    events {
+        worker_connections 1024;
+    }
+
+    http {
+        include       /etc/nginx/mime.types;
+        default_type  application/octet-stream;
+
+        log_format main '$remote_addr - $remote_user [$time_local] "$request" '
+                        '$status $body_bytes_sent "$http_referer" '
+                        '"$http_user_agent" "$http_x_forwarded_for"';
+        
+        access_log /var/log/nginx/access.log main;
+        error_log /var/log/nginx/error.log warn;
+
+        sendfile on;
+        tcp_nopush on;
+        tcp_nodelay on;
+        keepalive_timeout 65;
+
+        gzip on;
+        gzip_vary on;
+        gzip_min_length 1000;
+        gzip_types
+            text/plain
+            text/css
+            text/xml
+            text/javascript
+            application/javascript
+            application/xml+rss
+            application/json;
+
+        upstream frontend {
+            server frontend-service:3000;
+        }
+
+        upstream api_backend {
+            server api-gateway-service:8080;
+        }
+
+        upstream websocket_backend {
+            server websocket-service:8081;
+        }
+
+        server {
+            listen 80;
+            server_name _;
+
+            location / {
+                proxy_pass http://frontend;
+                proxy_http_version 1.1;
+                proxy_set_header Upgrade $http_upgrade;
+                proxy_set_header Connection 'upgrade';
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto $scheme;
+                proxy_cache_bypass $http_upgrade;
+            }
+
+            location /api/ {
+                proxy_pass http://api_backend;
+                proxy_http_version 1.1;
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto $scheme;
+            }
+
+            location /ws/ {
+                proxy_pass http://websocket_backend;
+                proxy_http_version 1.1;
+                proxy_set_header Upgrade $http_upgrade;
+                proxy_set_header Connection "upgrade";
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto $scheme;
+            }
+
+            location /health {
+                access_log off;
+                return 200 "healthy\n";
+                add_header Content-Type text/plain;
+            }
+        }
+    }

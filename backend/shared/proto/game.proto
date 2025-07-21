@@ -1,0 +1,331 @@
+syntax = "proto3";
+
+package game;
+option go_package = "./proto/game";
+
+import "google/protobuf/timestamp.proto";
+
+// GameService handles game-related operations
+service GameService {
+  rpc CreateRoom(CreateRoomRequest) returns (RoomResponse);
+  rpc JoinRoom(JoinRoomRequest) returns (RoomStateResponse);
+  rpc LeaveRoom(LeaveRoomRequest) returns (LeaveRoomResponse);
+  rpc StartGame(StartGameRequest) returns (GameStateResponse);
+  rpc SubmitAnswer(SubmitAnswerRequest) returns (AnswerResult);
+  rpc GetLeaderboard(LeaderboardRequest) returns (LeaderboardResponse);
+  rpc UpdateRoomSettings(UpdateRoomSettingsRequest) returns (RoomResponse);
+}
+
+// UserService handles user-related operations
+service UserService {
+  rpc CreateUser(CreateUserRequest) returns (UserResponse);
+  rpc GetUser(GetUserRequest) returns (UserResponse);
+  rpc UpdateUser(UpdateUserRequest) returns (UserResponse);
+  rpc DeleteUser(DeleteUserRequest) returns (DeleteUserResponse);
+}
+
+// Real-time events for WebSocket communication
+service RealtimeService {
+  rpc StreamGameEvents(GameEventRequest) returns (stream GameEvent);
+  rpc StreamRoomEvents(RoomEventRequest) returns (stream RoomEvent);
+}
+
+// Messages for Room operations
+message CreateRoomRequest {
+  string host_id = 1;
+  string room_name = 2;
+  int32 max_players = 3;
+  RoomSettings settings = 4;
+}
+
+message JoinRoomRequest {
+  string room_code = 1;
+  string user_id = 2;
+}
+
+message LeaveRoomRequest {
+  string room_id = 1;
+  string user_id = 2;
+}
+
+message StartGameRequest {
+  string room_id = 1;
+  string host_id = 2;
+  GameType game_type = 3;
+  int32 total_rounds = 4;
+}
+
+message UpdateRoomSettingsRequest {
+  string room_id = 1;
+  string host_id = 2;
+  RoomSettings settings = 3;
+}
+
+// Messages for Game operations
+message SubmitAnswerRequest {
+  string session_id = 1;
+  string user_id = 2;
+  string question_id = 3;
+  ResponseType response_type = 4;
+  SensorData response_data = 5;
+  double confidence_score = 6;
+  int32 time_to_respond = 7;
+}
+
+message LeaderboardRequest {
+  string session_id = 1;
+}
+
+// Messages for User operations
+message CreateUserRequest {
+  string email = 1;
+  string username = 2;
+  string avatar_url = 3;
+}
+
+message GetUserRequest {
+  string user_id = 1;
+}
+
+message UpdateUserRequest {
+  string user_id = 1;
+  string email = 2;
+  string username = 3;
+  string avatar_url = 4;
+}
+
+message DeleteUserRequest {
+  string user_id = 1;
+}
+
+// Response messages
+message RoomResponse {
+  Room room = 1;
+  string error = 2;
+}
+
+message RoomStateResponse {
+  Room room = 1;
+  repeated User participants = 2;
+  GameSession current_session = 3;
+  string error = 4;
+}
+
+message LeaveRoomResponse {
+  bool success = 1;
+  string error = 2;
+}
+
+message GameStateResponse {
+  GameSession session = 1;
+  Question current_question = 2;
+  string error = 3;
+}
+
+message AnswerResult {
+  bool correct = 1;
+  double accuracy_score = 2;
+  int32 points_earned = 3;
+  int32 total_points = 4;
+  int32 rank = 5;
+  string error = 6;
+}
+
+message LeaderboardResponse {
+  repeated PlayerScore scores = 1;
+  string error = 2;
+}
+
+message UserResponse {
+  User user = 1;
+  string error = 2;
+}
+
+message DeleteUserResponse {
+  bool success = 1;
+  string error = 2;
+}
+
+// Real-time event messages
+message GameEventRequest {
+  string session_id = 1;
+  string user_id = 2;
+}
+
+message RoomEventRequest {
+  string room_id = 1;
+  string user_id = 2;
+}
+
+message GameEvent {
+  EventType type = 1;
+  string session_id = 2;
+  oneof data {
+    Question question_started = 3;
+    RoundResult round_ended = 4;
+    LeaderboardResponse leaderboard_updated = 5;
+    GameSession game_finished = 6;
+  }
+  google.protobuf.Timestamp timestamp = 7;
+}
+
+message RoomEvent {
+  EventType type = 1;
+  string room_id = 2;
+  oneof data {
+    User user_joined = 3;
+    User user_left = 4;
+    Room room_updated = 5;
+    GameSession game_started = 6;
+  }
+  google.protobuf.Timestamp timestamp = 7;
+}
+
+// Data structures
+message Room {
+  string id = 1;
+  string code = 2;
+  string name = 3;
+  string host_id = 4;
+  RoomStatus status = 5;
+  int32 max_players = 6;
+  RoomSettings settings = 7;
+  google.protobuf.Timestamp created_at = 8;
+  google.protobuf.Timestamp updated_at = 9;
+}
+
+message User {
+  string id = 1;
+  string email = 2;
+  string username = 3;
+  string avatar_url = 4;
+  google.protobuf.Timestamp created_at = 5;
+  google.protobuf.Timestamp updated_at = 6;
+}
+
+message GameSession {
+  string id = 1;
+  string room_id = 2;
+  GameType game_type = 3;
+  GameStatus status = 4;
+  int32 current_round = 5;
+  int32 total_rounds = 6;
+  google.protobuf.Timestamp start_time = 7;
+  google.protobuf.Timestamp end_time = 8;
+  google.protobuf.Timestamp created_at = 9;
+  google.protobuf.Timestamp updated_at = 10;
+}
+
+message Question {
+  string id = 1;
+  string session_id = 2;
+  GameType type = 3;
+  string title = 4;
+  string description = 5;
+  SensorData target_data = 6;
+  int32 time_limit = 7;
+  int32 points = 8;
+  int32 round_number = 9;
+  google.protobuf.Timestamp created_at = 10;
+  google.protobuf.Timestamp updated_at = 11;
+}
+
+message PlayerScore {
+  string user_id = 1;
+  string session_id = 2;
+  User user = 3;
+  int32 score = 4;
+  int32 rank = 5;
+  double accuracy = 6;
+  google.protobuf.Timestamp updated_at = 7;
+}
+
+message RoundResult {
+  string question_id = 1;
+  repeated PlayerScore scores = 2;
+  string correct_answer = 3;
+  SensorData target_data = 4;
+}
+
+// Settings and configuration
+message RoomSettings {
+  bool allow_late_join = 1;
+  bool show_leaderboard = 2;
+  bool enable_multi_modal = 3;
+  int32 time_per_question = 4;
+}
+
+// Sensor data structures
+message SensorData {
+  GyroscopeData gyroscope = 1;
+  TouchData touch = 2;
+  VoiceData voice = 3;
+  GestureData gesture = 4;
+}
+
+message GyroscopeData {
+  double alpha = 1;
+  double beta = 2;
+  double gamma = 3;
+}
+
+message TouchData {
+  double x = 1;
+  double y = 2;
+  double pressure = 3;
+  int64 timestamp = 4;
+}
+
+message VoiceData {
+  string text = 1;
+  double confidence = 2;
+  string language = 3;
+  int32 duration = 4;
+}
+
+message GestureData {
+  string type = 1;
+  double confidence = 2;
+  string landmarks = 3; // JSON string of landmark data
+}
+
+// Enums
+enum RoomStatus {
+  ROOM_WAITING = 0;
+  ROOM_PLAYING = 1;
+  ROOM_FINISHED = 2;
+}
+
+enum GameType {
+  GAME_ORIENTATION_MATCH = 0;
+  GAME_GESTURE_COPY = 1;
+  GAME_VOICE_RECOGNITION = 2;
+  GAME_MULTI_MODAL_QUIZ = 3;
+  GAME_COLLABORATIVE_PUZZLE = 4;
+}
+
+enum GameStatus {
+  GAME_WAITING = 0;
+  GAME_ACTIVE = 1;
+  GAME_PAUSED = 2;
+  GAME_FINISHED = 3;
+}
+
+enum ResponseType {
+  RESPONSE_GYROSCOPE = 0;
+  RESPONSE_TOUCH = 1;
+  RESPONSE_VOICE = 2;
+  RESPONSE_GESTURE = 3;
+  RESPONSE_MULTI_MODAL = 4;
+}
+
+enum EventType {
+  EVENT_USER_JOINED = 0;
+  EVENT_USER_LEFT = 1;
+  EVENT_ROOM_UPDATED = 2;
+  EVENT_GAME_STARTED = 3;
+  EVENT_QUESTION_STARTED = 4;
+  EVENT_ROUND_ENDED = 5;
+  EVENT_LEADERBOARD_UPDATED = 6;
+  EVENT_GAME_FINISHED = 7;
+}

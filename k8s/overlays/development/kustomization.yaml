@@ -1,0 +1,103 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+metadata:
+  name: multimodal-platform-development
+
+# Base configuration
+resources:
+  - ../../base
+
+# Development-specific labels
+commonLabels:
+  environment: development
+
+# Namespace override for development
+namespace: multimodal-platform-dev
+
+# Image tags for development
+images:
+  - name: multimodal-frontend
+    newTag: dev
+  - name: multimodal-api-gateway
+    newTag: dev
+  - name: multimodal-websocket-service
+    newTag: dev
+  - name: multimodal-auth-service
+    newTag: dev
+  - name: multimodal-user-service
+    newTag: dev
+  - name: multimodal-game-service
+    newTag: dev
+
+# Patches for development environment
+patches:
+  # Reduce resource requirements for development
+  - target:
+      kind: Deployment
+      name: frontend
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 1
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/memory
+        value: "128Mi"
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/cpu
+        value: "100m"
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/memory
+        value: "512Mi"
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/cpu
+        value: "250m"
+
+  # Enable debug mode for backend services
+  - target:
+      kind: Deployment
+      labelSelector: "app.kubernetes.io/component in (gateway,realtime,auth,user,game)"
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/env/0/valueFrom/configMapKeyRef/key
+        value: GIN_MODE
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: GIN_MODE
+          value: "debug"
+
+  # Use NodePort for easier development access
+  - target:
+      kind: Service
+      name: nginx-service
+    patch: |-
+      - op: replace
+        path: /spec/type
+        value: NodePort
+      - op: add
+        path: /spec/ports/0/nodePort
+        value: 30080
+
+  # Disable ingress for development
+  - target:
+      kind: Ingress
+      name: multimodal-ingress
+    patch: |-
+      - op: replace
+        path: /spec/rules/0/host
+        value: localhost
+
+# Remove HPA for development
+patchesStrategicMerge:
+  - remove-hpa.yaml
+
+# Development-specific ConfigMap
+configMapGenerator:
+  - name: app-config
+    behavior: merge
+    literals:
+      - NODE_ENV=development
+      - GIN_MODE=debug
+      - NEXT_PUBLIC_API_URL=http://localhost:30080/api
+      - NEXT_PUBLIC_WS_URL=ws://localhost:30080/ws

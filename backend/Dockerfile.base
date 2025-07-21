@@ -1,0 +1,58 @@
+# Multi-stage Dockerfile for Go microservices
+FROM golang:1.21-alpine AS builder
+
+# Install git and ca-certificates (needed for fetching dependencies)
+RUN apk update && apk add --no-cache git ca-certificates tzdata && update-ca-certificates
+
+# Create appuser for security
+RUN adduser -D -g '' appuser
+
+# Set working directory
+WORKDIR /build
+
+# Copy go mod files
+COPY go.mod go.sum ./
+
+# Download dependencies
+RUN go mod download
+RUN go mod verify
+
+# Copy shared modules
+COPY shared/ shared/
+
+# Copy source code (will be overridden by specific service)
+COPY . .
+
+# Build arguments for service name
+ARG SERVICE_NAME
+ARG BUILD_FLAGS=""
+
+# Build the binary
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+    -ldflags='-w -s -extldflags "-static"' \
+    -a -installsuffix cgo \
+    -o app ./${SERVICE_NAME}/
+
+# Final stage - minimal runtime image
+FROM scratch
+
+# Import ca-certificates from builder
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+
+# Import timezone data
+COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
+
+# Import user/group files
+COPY --from=builder /etc/passwd /etc/passwd
+
+# Copy the binary
+COPY --from=builder /build/app /app
+
+# Use non-root user
+USER appuser
+
+# Expose port (will be overridden by specific service)
+EXPOSE 8080
+
+# Run the binary
+ENTRYPOINT ["/app"]

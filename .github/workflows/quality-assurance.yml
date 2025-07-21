@@ -1,0 +1,414 @@
+name: Quality Assurance
+
+on:
+  schedule:
+    # Run comprehensive tests daily at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to test'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+        - staging
+        - production
+      test_suite:
+        description: 'Test suite to run'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+        - all
+        - performance
+        - security
+        - accessibility
+        - load
+
+jobs:
+  # Comprehensive End-to-End Tests
+  comprehensive-e2e:
+    name: Comprehensive E2E Tests
+    runs-on: ubuntu-latest
+    if: github.event.inputs.test_suite == 'all' || github.event.inputs.test_suite == '' || github.event.schedule
+
+    strategy:
+      matrix:
+        browser: [chromium, firefox, webkit]
+        device: [desktop, mobile]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+
+    - name: Install dependencies
+      run: |
+        cd frontend
+        npm ci
+
+    - name: Install Playwright
+      run: |
+        cd frontend
+        npx playwright install --with-deps
+
+    - name: Run E2E tests
+      env:
+        BASE_URL: ${{ github.event.inputs.environment == 'production' && 'https://multimodal-platform.com' || 'https://staging.multimodal-platform.com' }}
+        BROWSER: ${{ matrix.browser }}
+        DEVICE_TYPE: ${{ matrix.device }}
+      run: |
+        cd frontend
+        npx playwright test --project=${{ matrix.browser }}-${{ matrix.device }}
+
+    - name: Upload test results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: e2e-results-${{ matrix.browser }}-${{ matrix.device }}
+        path: |
+          frontend/test-results/
+          frontend/playwright-report/
+        retention-days: 14
+
+  # Performance Testing
+  performance-tests:
+    name: Performance Tests
+    runs-on: ubuntu-latest
+    if: github.event.inputs.test_suite == 'all' || github.event.inputs.test_suite == 'performance' || github.event.schedule
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+
+    - name: Install Artillery
+      run: npm install -g artillery
+
+    - name: Run performance tests
+      env:
+        TARGET_URL: ${{ github.event.inputs.environment == 'production' && 'https://multimodal-platform.com' || 'https://staging.multimodal-platform.com' }}
+      run: |
+        # API performance tests
+        artillery run tests/performance/api-load-test.yml --target $TARGET_URL
+        
+        # WebSocket performance tests
+        artillery run tests/performance/websocket-load-test.yml --target ${TARGET_URL/https/wss}
+
+    - name: Lighthouse CI
+      uses: treosh/lighthouse-ci-action@v9
+      with:
+        urls: |
+          ${{ github.event.inputs.environment == 'production' && 'https://multimodal-platform.com' || 'https://staging.multimodal-platform.com' }}
+          ${{ github.event.inputs.environment == 'production' && 'https://multimodal-platform.com/lobby' || 'https://staging.multimodal-platform.com/lobby' }}
+          ${{ github.event.inputs.environment == 'production' && 'https://multimodal-platform.com/game' || 'https://staging.multimodal-platform.com/game' }}
+        uploadArtifacts: true
+        temporaryPublicStorage: true
+
+    - name: WebPageTest API
+      uses: WebPageTest/github-action@v1
+      with:
+        apikey: ${{ secrets.WPT_API_KEY }}
+        urls: ${{ github.event.inputs.environment == 'production' && 'https://multimodal-platform.com' || 'https://staging.multimodal-platform.com' }}
+        location: 'Dulles:Chrome'
+        runs: 3
+        pollResults: 5
+
+  # Security Testing
+  security-tests:
+    name: Security Tests
+    runs-on: ubuntu-latest
+    if: github.event.inputs.test_suite == 'all' || github.event.inputs.test_suite == 'security' || github.event.schedule
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: OWASP ZAP Full Scan
+      uses: zaproxy/action-full-scan@v0.4.0
+      with:
+        target: ${{ github.event.inputs.environment == 'production' && 'https://multimodal-platform.com' || 'https://staging.multimodal-platform.com' }}
+        rules_file_name: '.zap/rules.tsv'
+        cmd_options: '-a -j -m 10 -T 60'
+
+    - name: Nuclei Vulnerability Scanner
+      uses: projectdiscovery/nuclei-action@main
+      with:
+        target: ${{ github.event.inputs.environment == 'production' && 'https://multimodal-platform.com' || 'https://staging.multimodal-platform.com' }}
+        output: nuclei-results.txt
+
+    - name: SSL Labs Test
+      run: |
+        # Test SSL configuration
+        curl -s "https://api.ssllabs.com/api/v3/analyze?host=$(echo '${{ github.event.inputs.environment == 'production' && 'multimodal-platform.com' || 'staging.multimodal-platform.com' }}' | sed 's|https://||')" > ssl-results.json
+
+    - name: Upload security scan results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: security-scan-results
+        path: |
+          report_html.html
+          nuclei-results.txt
+          ssl-results.json
+        retention-days: 30
+
+  # Accessibility Testing
+  accessibility-tests:
+    name: Accessibility Tests
+    runs-on: ubuntu-latest
+    if: github.event.inputs.test_suite == 'all' || github.event.inputs.test_suite == 'accessibility' || github.event.schedule
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+
+    - name: Install dependencies
+      run: |
+        npm install -g @axe-core/cli pa11y
+
+    - name: Run axe-core tests
+      run: |
+        BASE_URL=${{ github.event.inputs.environment == 'production' && 'https://multimodal-platform.com' || 'https://staging.multimodal-platform.com' }}
+        axe $BASE_URL --save axe-results.json --verbose
+        axe $BASE_URL/lobby --save axe-lobby-results.json --verbose
+        axe $BASE_URL/game --save axe-game-results.json --verbose
+
+    - name: Run Pa11y tests
+      run: |
+        BASE_URL=${{ github.event.inputs.environment == 'production' && 'https://multimodal-platform.com' || 'https://staging.multimodal-platform.com' }}
+        pa11y $BASE_URL --reporter html > pa11y-home.html
+        pa11y $BASE_URL/lobby --reporter html > pa11y-lobby.html
+        pa11y $BASE_URL/game --reporter html > pa11y-game.html
+
+    - name: Upload accessibility test results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: accessibility-test-results
+        path: |
+          axe-*.json
+          pa11y-*.html
+        retention-days: 14
+
+  # Load Testing
+  load-tests:
+    name: Load Tests
+    runs-on: ubuntu-latest
+    if: github.event.inputs.test_suite == 'all' || github.event.inputs.test_suite == 'load' || github.event.schedule
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+
+    - name: Install k6
+      run: |
+        wget https://github.com/grafana/k6/releases/download/v0.45.0/k6-v0.45.0-linux-amd64.tar.gz
+        tar -xzf k6-v0.45.0-linux-amd64.tar.gz
+        sudo mv k6-v0.45.0-linux-amd64/k6 /usr/local/bin/
+
+    - name: Run load tests
+      env:
+        TARGET_URL: ${{ github.event.inputs.environment == 'production' && 'https://multimodal-platform.com' || 'https://staging.multimodal-platform.com' }}
+      run: |
+        # API load test
+        k6 run tests/load/api-load-test.js --env TARGET_URL=$TARGET_URL
+        
+        # WebSocket load test
+        k6 run tests/load/websocket-load-test.js --env TARGET_URL=$TARGET_URL
+        
+        # Game session load test
+        k6 run tests/load/game-session-load-test.js --env TARGET_URL=$TARGET_URL
+
+    - name: Upload load test results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: load-test-results
+        path: |
+          k6-results-*.json
+        retention-days: 14
+
+  # API Contract Testing
+  api-contract-tests:
+    name: API Contract Tests
+    runs-on: ubuntu-latest
+    if: github.event.inputs.test_suite == 'all' || github.event.schedule
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+
+    - name: Install Newman
+      run: npm install -g newman
+
+    - name: Run API contract tests
+      env:
+        API_BASE_URL: ${{ github.event.inputs.environment == 'production' && 'https://multimodal-platform.com/api' || 'https://staging.multimodal-platform.com/api' }}
+      run: |
+        newman run tests/postman/api-contract-tests.json \
+          --environment tests/postman/environments/${{ github.event.inputs.environment || 'staging' }}.json \
+          --reporters html,json \
+          --reporter-html-export contract-test-report.html \
+          --reporter-json-export contract-test-results.json
+
+    - name: Upload contract test results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: api-contract-test-results
+        path: |
+          contract-test-report.html
+          contract-test-results.json
+        retention-days: 14
+
+  # Database Performance Tests
+  database-performance:
+    name: Database Performance Tests
+    runs-on: ubuntu-latest
+    if: github.event.inputs.test_suite == 'all' || github.event.schedule
+    # Only run on staging to avoid impacting production
+    environment: staging
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: 'v1.28.0'
+
+    - name: Configure kubeconfig
+      run: |
+        mkdir -p ~/.kube
+        echo "${{ secrets.KUBE_CONFIG_STAGING }}" | base64 -d > ~/.kube/config
+
+    - name: Run database performance tests
+      run: |
+        # Connect to staging database and run performance queries
+        kubectl exec -i deployment/postgres -n multimodal-platform-staging -- psql -U postgres -d multimodal_platform << 'EOF'
+        -- Analyze query performance
+        EXPLAIN (ANALYZE, BUFFERS) SELECT * FROM game_sessions WHERE status = 'active';
+        EXPLAIN (ANALYZE, BUFFERS) SELECT * FROM player_responses WHERE session_id = 'test-session' ORDER BY created_at DESC LIMIT 100;
+        EXPLAIN (ANALYZE, BUFFERS) SELECT u.*, ps.score FROM users u JOIN player_scores ps ON u.id = ps.user_id WHERE ps.session_id = 'test-session' ORDER BY ps.score DESC;
+        
+        -- Check table sizes
+        SELECT schemaname,tablename,attname,n_distinct,correlation FROM pg_stats WHERE schemaname = 'public';
+        
+        -- Check index usage
+        SELECT schemaname,tablename,attname,n_distinct,correlation FROM pg_stats WHERE schemaname = 'public';
+        EOF
+
+  # Generate Quality Report
+  generate-report:
+    name: Generate Quality Report
+    runs-on: ubuntu-latest
+    needs: [comprehensive-e2e, performance-tests, security-tests, accessibility-tests, load-tests, api-contract-tests]
+    if: always()
+
+    steps:
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: ./test-results
+
+    - name: Generate comprehensive report
+      run: |
+        cat > quality-report.md << 'EOF'
+        # Quality Assurance Report
+        
+        **Environment:** ${{ github.event.inputs.environment || 'staging' }}
+        **Date:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+        **Trigger:** ${{ github.event_name }}
+        
+        ## Test Results Summary
+        
+        | Test Suite | Status | Details |
+        |------------|---------|---------|
+        | E2E Tests | ${{ needs.comprehensive-e2e.result }} | Multiple browsers and devices |
+        | Performance | ${{ needs.performance-tests.result }} | Lighthouse, Artillery, WebPageTest |
+        | Security | ${{ needs.security-tests.result }} | OWASP ZAP, Nuclei, SSL Labs |
+        | Accessibility | ${{ needs.accessibility-tests.result }} | axe-core, Pa11y |
+        | Load Testing | ${{ needs.load-tests.result }} | k6 load tests |
+        | API Contracts | ${{ needs.api-contract-tests.result }} | Postman/Newman |
+        
+        ## Artifacts Generated
+        - E2E test reports and screenshots
+        - Performance metrics and Lighthouse scores  
+        - Security vulnerability reports
+        - Accessibility audit results
+        - Load test performance data
+        - API contract validation results
+        
+        ## Next Steps
+        - Review failed tests and address issues
+        - Update documentation based on findings
+        - Schedule follow-up testing if needed
+        
+        EOF
+
+    - name: Upload quality report
+      uses: actions/upload-artifact@v4
+      with:
+        name: quality-assurance-report
+        path: quality-report.md
+        retention-days: 30
+
+    - name: Comment PR if applicable
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const fs = require('fs');
+          const report = fs.readFileSync('quality-report.md', 'utf8');
+          
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: `## 🔍 Quality Assurance Report\n\n${report}`
+          });
+
+    - name: Notify team
+      uses: 8398a7/action-slack@v3
+      with:
+        status: ${{ job.status }}
+        text: |
+          📊 Quality Assurance Report Generated
+          Environment: ${{ github.event.inputs.environment || 'staging' }}
+          Overall Status: ${{ job.status }}
+          
+          Test Results:
+          - E2E: ${{ needs.comprehensive-e2e.result }}
+          - Performance: ${{ needs.performance-tests.result }}
+          - Security: ${{ needs.security-tests.result }}
+          - Accessibility: ${{ needs.accessibility-tests.result }}
+          - Load: ${{ needs.load-tests.result }}
+          - API Contracts: ${{ needs.api-contract-tests.result }}
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

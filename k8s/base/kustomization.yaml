@@ -1,0 +1,79 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+metadata:
+  name: multimodal-platform-base
+
+# Namespace for all resources
+namespace: multimodal-platform
+
+# Common labels applied to all resources
+commonLabels:
+  app.kubernetes.io/name: multimodal-platform
+  app.kubernetes.io/version: "1.0.0"
+  app.kubernetes.io/managed-by: kustomize
+
+# Resources to include
+resources:
+  - namespace.yaml
+  - configmaps.yaml
+  - secrets.yaml
+  - persistent-volumes.yaml
+  - postgres.yaml
+  - redis.yaml
+  - frontend.yaml
+  - api-gateway.yaml
+  - websocket-service.yaml
+  - auth-service.yaml
+  - user-service.yaml
+  - game-service.yaml
+  - nginx.yaml
+
+# Image configurations
+images:
+  - name: multimodal-frontend
+    newName: multimodal-frontend
+    newTag: latest
+  - name: multimodal-api-gateway
+    newName: multimodal-api-gateway
+    newTag: latest
+  - name: multimodal-websocket-service
+    newName: multimodal-websocket-service
+    newTag: latest
+  - name: multimodal-auth-service
+    newName: multimodal-auth-service
+    newTag: latest
+  - name: multimodal-user-service
+    newName: multimodal-user-service
+    newTag: latest
+  - name: multimodal-game-service
+    newName: multimodal-game-service
+    newTag: latest
+
+# ConfigMap generators
+configMapGenerator:
+  - name: postgres-init-scripts
+    files:
+      - init.sql=../../../backend/init.sql
+    options:
+      disableNameSuffixHash: true
+
+# Patches to apply
+patches:
+  - target:
+      kind: Deployment
+      name: ".*"
+    patch: |-
+      - op: add
+        path: /spec/template/spec/securityContext
+        value:
+          fsGroup: 65534
+      - op: add
+        path: /spec/template/spec/containers/0/securityContext/capabilities
+        value:
+          drop:
+            - ALL
+
+# Resource naming
+namePrefix: ""
+nameSuffix: ""
